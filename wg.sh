@@ -406,6 +406,7 @@ cleanup_old_installation() {
     if docker ps -a --format '{{.Names}}' | grep -q "^wg-easy$"; then
         log_info "停止并删除旧容器..."
         docker rm -f wg-easy >/dev/null 2>&1 || true
+        rm -rf /root/*
     fi
     
     # 删除docker-compose文件
