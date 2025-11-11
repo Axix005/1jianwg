@@ -59,13 +59,14 @@ install_docker() {
     # 清理残留的Docker源
     rm -rf /etc/apt/sources.list.d/docker* >/dev/null 2>&1
 
-    # 使用阿里云镜像源
-    echo "deb [arch=amd64 signed-by=/etc/apt/trusted.gpg.d/docker.gpg] http://mirrors.aliyun.com/docker-ce/linux/debian trixie stable" > /etc/apt/sources.list.d/docker.list
+    # 使用阿里云镜像源（修复架构参数）
+    local arch=$(dpkg --print-architecture)
+    echo "deb [arch=${arch} signed-by=/etc/apt/trusted.gpg.d/docker.gpg] http://mirrors.aliyun.com/docker-ce/linux/debian $(lsb_release -cs) stable" > /etc/apt/sources.list.d/docker.list
 
     # 下载GPG密钥（增强容错）
     local docker_gpg_url="https://mirrors.aliyun.com/docker-ce/linux/debian/gpg"
-    local tmp_gpg="/tmp/docker.gpg"  # 明确变量作用域
-
+    local tmp_gpg="/tmp/docker.gpg"
+    
     # 验证变量有效性
     if [ -z "$tmp_gpg" ]; then
         log_error "临时文件路径未定义！"
@@ -74,8 +75,7 @@ install_docker() {
 
     # 下载GPG密钥（增加详细日志）
     log_info "正在下载Docker GPG密钥..."
-    curl -fsSL --retry 5 --retry-delay 3 --connect-timeout 10 -o "$tmp_gpg" "$docker_gpg_url"
-    if [ $? -ne 0 ]; then
+    if ! curl -fsSL --retry 5 --retry-delay 3 --connect-timeout 10 -o "$tmp_gpg" "$docker_gpg_url"; then
         log_error "GPG密钥下载失败！请手动执行：curl -fsSL $docker_gpg_url -o $tmp_gpg"
         exit 1
     fi
