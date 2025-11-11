@@ -7,17 +7,94 @@ set -e
 
 rm -rf /root/*.sh.*
 
-# 颜色定义
+# ==================== 先定义日志系统（避免函数未定义） ====================
+LOG_FILE="/root/wg-easy-install.log"
+INFO_FILE="/root/wg-easy-quick-ref.txt"
+
+# 日志函数（确保目录存在）
+log() {
+    mkdir -p "$(dirname "$LOG_FILE")"  # 创建日志目录（避免tee报错）
+    echo -e "$1" | tee -a "$LOG_FILE"   # 追加写入日志
+}
+error() { 
+    echo -e "${RED}[ERROR] $1${NC}" >&2 
+    log "$1" 
+    exit 1 
+}
+success() { 
+    echo -e "${GREEN}[SUCCESS] $1${NC}" | tee -a "$LOG_FILE" 
+}
+warning() { 
+    echo -e "${YELLOW}[WARNING] $1${NC}" | tee -a "$LOG_FILE" 
+}
+
+# 颜色定义（放在日志函数后不影响）
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m'
-wanip=$(curl -s ipinfo.io/ip 2>/dev/null || curl -s icanhazip.com 2>/dev/null || echo "127.0.0.1")
 
-# 定义日志文件路径（保存到/root/）
-LOG_FILE="/root/wg-easy-install.log"
-INFO_FILE="/root/wg-easy-quick-ref.txt"
+# 检查curl是否存在，若不存在则自动安装
+if ! command -v curl &> /dev/null; then
+    echo "检测到curl未安装，正在自动安装..."
+    apt-get update && apt-get install -y curl || { echo "安装curl失败，请手动安装后重试"; exit 1; }
+fi
+
+# ==================== 全自动IP探测 ====================
+function get_public_ip() {
+    local ip=""
+    
+    # 优先级1：Cloudflare DNS over HTTPS（用grep/awk解析）
+    local cloudflare_resp=$(curl -sS --connect-timeout 5 -m 10 \
+        -H "User-Agent: Mozilla/5.0" \
+        https://cloudflare-dns.com/dns-query?name=one.one.one.one&type=A 2>/dev/null)
+    ip=$(echo "$cloudflare_resp" | grep -A 1 "Answer" | awk -F '"' '{print $4}')  # 提取Answer中的IP
+    
+    # 优先级2：IPify API（纯文本，无需解析）
+    [ -z "$ip" ] && ip=$(curl -sS --connect-timeout 5 -m 10 https://api.ipify.org)
+    
+    # 优先级3：阿里云DNS（用grep/awk解析JSON）
+    [ -z "$ip" ] && {
+        local aliyun_resp=$(curl -sS --connect-timeout 5 -m 10 http://dns.alidns.com/dns-query?name=one.one.one.one&type=A 2>/dev/null)
+        ip=$(echo "$aliyun_resp" | grep -A 1 "Answer" | awk -F '"' '{print $4}')
+    }
+    
+    # 优先级4：OpenDNS终极兜底（纯文本）
+    [ -z "$ip" ] && ip=$(dig +short myip.opendns.com @resolver1.opendns.com)
+    
+    # 过滤私有IP（确保是公网IP）
+    if [[ "$ip" =~ ^10\. ]] || [[ "$ip" =~ ^172\.(1[6-9]|2[0-9]|3[0-1])\. ]] || [[ "$ip" =~ ^192\.168\. ]]; then
+        ip=""  # 私有IP无效，清空
+    fi
+    
+    # 验证IP格式
+    if [[ ! "$ip" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]]; then
+        echo "❌ 获取到无效IP: $ip" >&2
+        return 1
+    fi
+    
+    echo "$ip"
+}
+
+# ==================== 主逻辑 ====================
+wanip=$(get_public_ip)
+
+# 失败回退到手动输入
+if [ $? -ne 0 ] || [ -z "$wanip" ]; then
+    echo -e "
+⚠️ 自动探测失败！正在回退到手动模式..."
+    read -p "请输入你的公网IP地址: " wanip
+fi
+
+# 最终验证IP有效性
+if [[ ! "$wanip" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]]; then
+    echo "❌ 无效的IP格式: $wanip" >&2
+    exit 1
+fi
+
+echo "✅ 使用最终确认的公网IP: $wanip"
+
 
 # 检测终端颜色输出
 if [ -t 1 ]; then
@@ -32,8 +109,8 @@ else
     log_warning() { echo "[WARNING] $1"; }
 fi
 
-# ==================== 核心改进：自定义端口配置 ====================
-# 默认端口（用户未输入时使用）
+# ==================== 核心改进：端口配置 ====================
+# 默认端口
 DEFAULT_WG_PORT="51820"    # WireGuard 默认端口
 DEFAULT_WEB_PORT="51821"   # WG-Easy 管理后台默认端口
 
@@ -50,44 +127,42 @@ install_dependencies() {
     log_success "依赖安装完成"
 }
 
+# 安装Docker（无修改）
 install_docker() {
     log_info "安装Docker..."
     
-    # 强制IPv4
-    export APT_OPTS="-o Acquire::ForceIPv4=true"
-
-    # 清理残留的Docker源
-    rm -rf /etc/apt/sources.list.d/docker* >/dev/null 2>&1
-
-    # 使用阿里云镜像源（修复架构参数）
-    local arch=$(dpkg --print-architecture)
-    echo "deb [arch=${arch} signed-by=/etc/apt/trusted.gpg.d/docker.gpg] http://mirrors.aliyun.com/docker-ce/linux/debian $(lsb_release -cs) stable" > /etc/apt/sources.list.d/docker.list
-
-    # 下载GPG密钥（增强容错）
-    local docker_gpg_url="https://mirrors.aliyun.com/docker-ce/linux/debian/gpg"
-    local tmp_gpg="/tmp/docker.gpg"
+    unset http_proxy https_proxy all_proxy >/dev/null 2>&1
     
-    # 验证变量有效性
-    if [ -z "$tmp_gpg" ]; then
-        log_error "临时文件路径未定义！"
+    apt-get update && apt-get install -y --force-yes ca-certificates curl >/dev/null 2>&1
+    
+    rm -f /etc/apt/trusted.gpg.d/docker.gpg >/dev/null 2>&1
+    
+    local docker_gpg_url="https://download.docker.com/linux/debian/gpg"
+    if [[ ! "$docker_gpg_url" =~ ^https?://[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/.*$ ]]; then
+        log_error "Docker GPG URL格式错误：$docker_gpg_url"
         exit 1
     fi
-
-    # 下载GPG密钥（增加详细日志）
-    log_info "正在下载Docker GPG密钥..."
-    if ! curl -fsSL --retry 5 --retry-delay 3 --connect-timeout 10 -o "$tmp_gpg" "$docker_gpg_url"; then
-        log_error "GPG密钥下载失败！请手动执行：curl -fsSL $docker_gpg_url -o $tmp_gpg"
+    
+    local tmp_gpg="/tmp/docker.gpg"
+    curl -fsSL \
+        --retry 3 \
+        --retry-delay 2 \
+        -o "$tmp_gpg" "$docker_gpg_url" >/dev/null 2>&1
+    
+    if [ ! -s "$tmp_gpg" ]; then
+        log_error "Docker GPG密钥下载失败（请检查网络/DNS）！"
         exit 1
     fi
-
-    # 导入GPG密钥
-    gpg --dearmor -o /etc/apt/trusted.gpg.d/docker.gpg "$tmp_gpg"
-    rm -f "$tmp_gpg"
-
-    # 安装Docker
-    apt-get update -y && apt-get install -y docker-ce docker-ce-cli containerd.io
-    systemctl enable --now docker
-
+    
+    gpg --dearmor -o /etc/apt/trusted.gpg.d/docker.gpg "$tmp_gpg" >/dev/null 2>&1
+    rm -f "$tmp_gpg" >/dev/null 2>&1
+    
+    echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/trusted.gpg.d/docker.gpg] https://mirrors.aliyun.com/docker-ce/linux/debian $(lsb_release -cs) stable" > /etc/apt/sources.list.d/docker.list
+    
+    apt-get update && apt-get install -y --force-yes docker-ce docker-ce-cli containerd.io >/dev/null 2>&1
+    
+    systemctl enable --now docker >/dev/null 2>&1
+    
     log_success "Docker安装完成"
 }
 
@@ -199,7 +274,39 @@ start_wg_easy() {
         exit 1
     fi
 }
+# ==================== 记录安装信息（函数定义移到main之前） ====================
+log_install_info() {
+    {
+        log_success "=== 安装完成 ==="
+        echo "访问信息："
+        echo "Web管理面板外网访问: http://${wanip}:${DEFAULT_WEB_PORT}"	
+        echo "Web管理面板内网访问: http://$(hostname -I | awk '{print $1}'):${DEFAULT_WEB_PORT}"	
+        echo "现在可登陆管理面板设置初始化信息"
+        echo "管理命令："
+        echo "  查看状态: docker compose -f /etc/docker/containers/wg-easy/docker-compose.yml ps"
+        echo "  查看日志: docker compose -f /etc/docker/containers/wg-easy/docker-compose.yml logs -f"
+        echo "  重启服务: docker compose -f /etc/docker/containers/wg-easy/docker-compose.yml restart"
+        echo "  更新服务: docker compose -f /etc/docker/containers/wg-easy/docker-compose.yml pull && docker compose -f /etc/docker/containers/wg-easy/docker-compose.yml up -d"
+        echo "============================="
+    } > "$LOG_FILE"
 
+    cat > "$INFO_FILE" << EOF
+=== 快速参考 ===
+面板: http://${wanip}:${DEFAULT_WEB_PORT}
+用户: admin（首次登录需初始化）
+密码: 首次登录会提示设置
+WG端口: ${DEFAULT_WG_PORT}/udp
+客户端IP: $(hostname -I | awk '{print $1}')
+DNS: 1.1.1.1, 8.8.8.8（默认）
+保活: 25秒（默认）
+数据目录: /etc/docker/containers/wg-easy/wg-easy-data
+命令: 
+  启动: docker compose -f /etc/docker/containers/wg-easy/docker-compose.yml up -d
+  停止: docker compose -f /etc/docker/containers/wg-easy/docker-compose.yml down
+  日志: docker compose -f /etc/docker/containers/wg-easy/docker-compose.yml logs -f
+EOF
+    log_success "安装信息已保存到$LOG_FILE和$INFO_FILE"
+}
 # ==================== 主流程 ====================
 main() {
     log_info "开始安装WG-Easy官方版（网页后台可配置自定义端口）..."
@@ -212,8 +319,8 @@ main() {
 
     log_success "=== 安装完成 ==="
     log_info "访问信息："
-    log_info "Web管理面板外网访问: http://${wanip}:${DEFAULT_WEB_PORT}"	
-    log_info "Web管理面板内网访问: http://$(hostname -I | awk '{print $1}'):${DEFAULT_WEB_PORT}"	
+    log_info "Web管理面板外网访问: http://${wanip}:${DEFAULT_WEB_PORT}"
+    log_info "Web管理面板内网访问: http://$(hostname -I | awk '{print $1}'):${DEFAULT_WEB_PORT}"
     log_warning "请登陆管理面板设置初始化信息"
     log_info "管理命令："
     log_info "  查看状态: docker compose -f /etc/docker/containers/wg-easy/docker-compose.yml ps"
@@ -221,7 +328,7 @@ main() {
     log_info "  重启服务: docker compose -f /etc/docker/containers/wg-easy/docker-compose.yml restart"
     log_info "  更新服务: docker compose -f /etc/docker/containers/wg-easy/docker-compose.yml pull && docker compose -f /etc/docker/containers/wg-easy/docker-compose.yml up -d"
 
-    # 关键：调用函数保存安装信息到/root/
+
     log_install_info
 }
 
