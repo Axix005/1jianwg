@@ -133,10 +133,10 @@ install_docker() {
     
     # 设置Docker仓库GPG密钥（手动导入）
     local docker_gpg_key="https://download.docker.com/linux/debian/gpg"
-    curl -fsSL "$docker_gpg_key" | sudo gpg --dearmor -o /etc/apt/trusted.gpg.d/docker.gpg
+    curl -fsSL "$docker_gpg_key" | gpg --dearmor -o /etc/apt/trusted.gpg.d/docker.gpg
 
     # 设置Docker仓库地址（使用阿里云镜像）
-    echo "deb [arch=amd64 signed-by=/etc/apt/trusted.gpg.d/docker.gpg] https://mirrors.aliyun.com/docker-ce/linux/debian $(lsb_release -cs) stable" | sudo tee /etc/apt/sources.list.d/docker.list
+    echo "deb [arch=amd64 signed-by=/etc/apt/trusted.gpg.d/docker.gpg] https://mirrors.aliyun.com/docker-ce/linux/debian $(lsb_release -cs) stable" | tee /etc/apt/sources.list.d/docker.list
 
     # 更新并安装Docker
     apt-get update
