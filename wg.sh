@@ -50,7 +50,6 @@ install_dependencies() {
     log_success "依赖安装完成"
 }
 
-# 安装Docker（修正版）
 install_docker() {
     log_info "安装Docker..."
     
@@ -65,8 +64,25 @@ install_docker() {
 
     # 下载GPG密钥（增强容错）
     local docker_gpg_url="https://mirrors.aliyun.com/docker-ce/linux/debian/gpg"
+    local tmp_gpg="/tmp/docker.gpg"  # 明确变量作用域
+
+    # 验证变量有效性
+    if [ -z "$tmp_gpg" ]; then
+        log_error "临时文件路径未定义！"
+        exit 1
+    fi
+
+    # 下载GPG密钥（增加详细日志）
+    log_info "正在下载Docker GPG密钥..."
     curl -fsSL --retry 5 --retry-delay 3 --connect-timeout 10 -o "$tmp_gpg" "$docker_gpg_url"
+    if [ $? -ne 0 ]; then
+        log_error "GPG密钥下载失败！请手动执行：curl -fsSL $docker_gpg_url -o $tmp_gpg"
+        exit 1
+    fi
+
+    # 导入GPG密钥
     gpg --dearmor -o /etc/apt/trusted.gpg.d/docker.gpg "$tmp_gpg"
+    rm -f "$tmp_gpg"
 
     # 安装Docker
     apt-get update -y && apt-get install -y docker-ce docker-ce-cli containerd.io
