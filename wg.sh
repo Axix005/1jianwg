@@ -139,9 +139,9 @@ install_docker() {
     echo "deb [arch=amd64 signed-by=/etc/apt/trusted.gpg.d/docker.gpg] https://mirrors.aliyun.com/docker-ce/linux/debian $(lsb_release -cs) stable" | sudo tee /etc/apt/sources.list.d/docker.list
 
     # 更新并安装Docker
-    sudo apt-get update
-    sudo apt-get install -y docker-ce docker-ce-cli containerd.io
-    sudo systemctl enable --now docker
+    apt-get update
+    apt-get install -y docker-ce docker-ce-cli containerd.io
+    systemctl enable --now docker
 
     log_success "Docker安装完成"
 }
