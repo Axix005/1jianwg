@@ -50,42 +50,28 @@ install_dependencies() {
     log_success "依赖安装完成"
 }
 
-# 安装Docker（无修改）
+# 安装Docker（优化版）
 install_docker() {
     log_info "安装Docker..."
     
-    unset http_proxy https_proxy all_proxy >/dev/null 2>&1
-    
-    apt-get update && apt-get install -y --force-yes ca-certificates curl >/dev/null 2>&1
-    
-    rm -f /etc/apt/trusted.gpg.d/docker.gpg >/dev/null 2>&1
-    
-    local docker_gpg_url="https://download.docker.com/linux/debian/gpg"
-    if [[ ! "$docker_gpg_url" =~ ^https?://[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/.*$ ]]; then
-        log_error "Docker GPG URL格式错误：$docker_gpg_url"
-        exit 1
-    fi
-    
-    local tmp_gpg="/tmp/docker.gpg"
-    curl -fsSL \
-        --retry 3 \
-        --retry-delay 2 \
-        -o "$tmp_gpg" "$docker_gpg_url" >/dev/null 2>&1
-    
-    if [ ! -s "$tmp_gpg" ]; then
-        log_error "Docker GPG密钥下载失败（请检查网络/DNS）！"
-        exit 1
-    fi
-    
-    gpg --dearmor -o /etc/apt/trusted.gpg.d/docker.gpg "$tmp_gpg" >/dev/null 2>&1
-    rm -f "$tmp_gpg" >/dev/null 2>&1
-    
-    echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/trusted.gpg.d/docker.gpg] https://mirrors.aliyun.com/docker-ce/linux/debian $(lsb_release -cs) stable" > /etc/apt/sources.list.d/docker.list
-    
-    apt-get update && apt-get install -y --force-yes docker-ce docker-ce-cli containerd.io >/dev/null 2>&1
-    
-    systemctl enable --now docker >/dev/null 2>&1
-    
+    # 强制使用IPv4
+    export APT_OPTS="-o Acquire::ForceIPv4=true"
+
+    # 清理残留的Docker源
+    rm -rf /etc/apt/sources.list.d/docker* >/dev/null 2>&1
+
+    # 使用阿里云镜像源
+    echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/trusted.gpg.d/docker.gpg] http://mirrors.aliyun.com/docker-ce/linux/debian $(lsb_release -cs) stable" > /etc/apt/sources.list.d/docker.list
+
+    # 下载GPG密钥（增强容错）
+    local docker_gpg_url="https://mirrors.aliyun.com/docker-ce/linux/debian/gpg"
+    curl -fsSL --retry 5 --output /tmp/docker.gpg "$docker_gpg_url"
+    gpg --dearmor -o /etc/apt/trusted.gpg.d/docker.gpg /tmp/docker.gpg
+
+    # 安装Docker
+    apt-get update -y && apt-get install -y docker-ce docker-ce-cli containerd.io
+    systemctl enable --now docker
+
     log_success "Docker安装完成"
 }
 
