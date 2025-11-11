@@ -127,42 +127,22 @@ install_dependencies() {
     log_success "依赖安装完成"
 }
 
-# 安装Docker（无修改）
+# 安装Docker（修正版）
 install_docker() {
     log_info "安装Docker..."
     
-    unset http_proxy https_proxy all_proxy >/dev/null 2>&1
-    
-    apt-get update && apt-get install -y --force-yes ca-certificates curl >/dev/null 2>&1
-    
-    rm -f /etc/apt/trusted.gpg.d/docker.gpg >/dev/null 2>&1
-    
-    local docker_gpg_url="https://download.docker.com/linux/debian/gpg"
-    if [[ ! "$docker_gpg_url" =~ ^https?://[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/.*$ ]]; then
-        log_error "Docker GPG URL格式错误：$docker_gpg_url"
-        exit 1
-    fi
-    
-    local tmp_gpg="/tmp/docker.gpg"
-    curl -fsSL \
-        --retry 3 \
-        --retry-delay 2 \
-        -o "$tmp_gpg" "$docker_gpg_url" >/dev/null 2>&1
-    
-    if [ ! -s "$tmp_gpg" ]; then
-        log_error "Docker GPG密钥下载失败（请检查网络/DNS）！"
-        exit 1
-    fi
-    
-    gpg --dearmor -o /etc/apt/trusted.gpg.d/docker.gpg "$tmp_gpg" >/dev/null 2>&1
-    rm -f "$tmp_gpg" >/dev/null 2>&1
-    
-    echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/trusted.gpg.d/docker.gpg] https://mirrors.aliyun.com/docker-ce/linux/debian $(lsb_release -cs) stable" > /etc/apt/sources.list.d/docker.list
-    
-    apt-get update && apt-get install -y --force-yes docker-ce docker-ce-cli containerd.io >/dev/null 2>&1
-    
-    systemctl enable --now docker >/dev/null 2>&1
-    
+    # 设置Docker仓库GPG密钥（手动导入）
+    local docker_gpg_key="https://download.docker.com/linux/debian/gpg"
+    curl -fsSL "$docker_gpg_key" | sudo gpg --dearmor -o /etc/apt/trusted.gpg.d/docker.gpg
+
+    # 设置Docker仓库地址（使用阿里云镜像）
+    echo "deb [arch=amd64 signed-by=/etc/apt/trusted.gpg.d/docker.gpg] https://mirrors.aliyun.com/docker-ce/linux/debian $(lsb_release -cs) stable" | sudo tee /etc/apt/sources.list.d/docker.list
+
+    # 更新并安装Docker
+    sudo apt-get update
+    sudo apt-get install -y docker-ce docker-ce-cli containerd.io
+    sudo systemctl enable --now docker
+
     log_success "Docker安装完成"
 }
 
