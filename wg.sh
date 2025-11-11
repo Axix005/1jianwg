@@ -50,23 +50,23 @@ install_dependencies() {
     log_success "依赖安装完成"
 }
 
-# 安装Docker（优化版）
+# 安装Docker（修正版）
 install_docker() {
     log_info "安装Docker..."
     
-    # 强制使用IPv4
+    # 强制IPv4
     export APT_OPTS="-o Acquire::ForceIPv4=true"
 
     # 清理残留的Docker源
     rm -rf /etc/apt/sources.list.d/docker* >/dev/null 2>&1
 
     # 使用阿里云镜像源
-    echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/trusted.gpg.d/docker.gpg] http://mirrors.aliyun.com/docker-ce/linux/debian $(lsb_release -cs) stable" > /etc/apt/sources.list.d/docker.list
+    echo "deb [arch=amd64 signed-by=/etc/apt/trusted.gpg.d/docker.gpg] http://mirrors.aliyun.com/docker-ce/linux/debian trixie stable" > /etc/apt/sources.list.d/docker.list
 
     # 下载GPG密钥（增强容错）
     local docker_gpg_url="https://mirrors.aliyun.com/docker-ce/linux/debian/gpg"
-    curl -fsSL --retry 5 --output /tmp/docker.gpg "$docker_gpg_url"
-    gpg --dearmor -o /etc/apt/trusted.gpg.d/docker.gpg /tmp/docker.gpg
+    curl -fsSL --retry 5 --retry-delay 3 --connect-timeout 10 -o "$tmp_gpg" "$docker_gpg_url"
+    gpg --dearmor -o /etc/apt/trusted.gpg.d/docker.gpg "$tmp_gpg"
 
     # 安装Docker
     apt-get update -y && apt-get install -y docker-ce docker-ce-cli containerd.io
