@@ -206,8 +206,8 @@ install_docker() {
 # 安装Docker Compose（无修改）
 install_docker_compose() {
     log_info "安装Docker Compose..."
-    COMPOSE_VERSION=$(curl -s https://api.github.com/repos/docker/compose/releases/latest | grep 'tag_name' | cut -d '"' -f 4)
-    curl -L "https://github.com/docker/compose/releases/download/${COMPOSE_VERSION}/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
+    COMPOSE_VERSION=$(curl -s https://ghfast.top/https://api.github.com/repos/docker/compose/releases/latest | grep 'tag_name' | cut -d '"' -f 4)
+    curl -L "https://ghfast.top/https://github.com/docker/compose/releases/download/${COMPOSE_VERSION}/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
     chmod +x /usr/local/bin/docker-compose
     log_success "Docker Compose安装完成 ($(docker-compose --version | cut -d' ' -f3))"
 }
@@ -219,7 +219,7 @@ setup_config() {
     cd /etc/docker/containers/wg-easy || exit
 
     log_info "下载官方Docker Compose文件..."
-    curl -o docker-compose.yml https://ghproxy.com/https://raw.githubusercontent.com/wg-easy/wg-easy/master/docker-compose.yml
+    curl -o docker-compose.yml https://ghfast.top/https://raw.githubusercontent.com/wg-easy/wg-easy/master/docker-compose.yml
 
     # ==================== 禁用https ====================
     log_info "配置禁用https"
