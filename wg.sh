@@ -332,7 +332,8 @@ check_installed() {
 
     if [ "$installed" = true ]; then
         log_success "检测到 WG-Easy 已安装并正在运行"
-        log_info "Web管理面板: http://${wanip}:${DEFAULT_WEB_PORT}"
+        log_info "Web管理面板公网: http://${wanip}:${DEFAULT_WEB_PORT}"
+		log_info "Web管理面板内网: http://$(hostname -I | awk '{print $1}'):${DEFAULT_WEB_PORT}"
         log_info "如需重新安装，请先停止并删除容器："
         log_info "  docker stop wg-easy && docker rm wg-easy"
         log_info "  rm -rf /etc/docker/containers/wg-easy"
