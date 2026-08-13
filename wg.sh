@@ -61,10 +61,10 @@ function get_public_ip() {
     local cloudflare_resp=$(curl -sS --connect-timeout 5 -m 10 \
         -H "User-Agent: Mozilla/5.0" \
         https://cloudflare-dns.com/dns-query?name=one.one.one.one&type=A 2>/dev/null)
-    ip=$(echo "$cloudflare_resp" | grep -A 1 "Answer" | awk -F '"' '{print $4}')  # 提取Answer中的IP
+    ip=$(echo "$cloudflare_resp" | grep -A 1 "Answer" | awk -F '"' '{print $4}' 2>/dev/null)  # 提取Answer中的IP
     
     # 优先级2：IPify API（纯文本，无需解析）
-    [ -z "$ip" ] && ip=$(curl -sS --connect-timeout 5 -m 10 https://api.ipify.org)
+    [ -z "$ip" ] && ip=$(curl -sS --connect-timeout 5 -m 10 https://api.ipify.org 2>/dev/null)
     
     # 优先级3：阿里云DNS（用grep/awk解析JSON）
     [ -z "$ip" ] && {
@@ -73,7 +73,7 @@ function get_public_ip() {
     }
     
     # 优先级4：OpenDNS终极兜底（纯文本）
-    [ -z "$ip" ] && ip=$(dig +short myip.opendns.com @resolver1.opendns.com)
+    [ -z "$ip" ] && ip=$(dig +short myip.opendns.com @resolver1.opendns.com 2>/dev/null)
     
     # 过滤私有IP（确保是公网IP）
     if [[ "$ip" =~ ^10\. ]] || [[ "$ip" =~ ^172\.(1[6-9]|2[0-9]|3[0-1])\. ]] || [[ "$ip" =~ ^192\.168\. ]]; then
