@@ -245,7 +245,10 @@ setup_config() {
     cd /etc/docker/containers/wg-easy || exit
 
     log_info "下载官方Docker Compose文件..."
-    curl -o docker-compose.yml https://raw.githubusercontent.com/wg-easy/wg-easy/master/docker-compose.yml
+    if ! curl -L -o docker-compose.yml --connect-timeout 10 --retry 5 --retry-delay 3 https://raw.githubusercontent.com/wg-easy/wg-easy/master/docker-compose.yml; then
+	log_error "下载失败，请检查网络后重试，或手动下载该文件到 $(pwd)"
+    exit 1
+    fi
 
     # ==================== 禁用https ====================
     log_info "配置禁用https"
