@@ -372,6 +372,5 @@ main "$@"
 # ==================== 清理临时文件 ====================
 # 保留 install.log 和 quick-ref.txt 供用户查阅
 rm -f "$SCRIPT_SELF" 2>/dev/null
-rm -f /root/*.sh.* 2>/dev/null
 
 exit 0
