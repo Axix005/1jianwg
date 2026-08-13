@@ -198,55 +198,65 @@ setup_config() {
 # ==================== 改进：防火墙配置 ====================
 configure_firewall() {
     log_info "配置防火墙..."
+	
+    # 标记 UFW 是否安装成功
+    UFW_INSTALLED=false
 
-    # 安装UFW（无修改逻辑，保留原容错）
+    # 安装 UFW（失败不退出，但记录标记）
     if ! command -v ufw &> /dev/null; then
-        log_info "UFW命令未找到，正在安装..."
-        apt-get update && apt-get install -y ufw >/dev/null 2>&1 || {
-            log_error "UFW安装失败（不影响后续配置，继续执行）..."
-        }
-        log_success "UFW安装完成"
-    fi
-
-    # 启动UFW（无修改逻辑，保留原容错）
-    if systemctl is-active --quiet ufw; then
-        log_success "UFW服务正在运行"
+        log_info "UFW 未安装，正在安装..."
+        if apt-get update && apt-get install -y ufw >/dev/null 2>&1; then
+            log_success "UFW 安装完成"
+            UFW_INSTALLED=true
+        else
+            log_warning "UFW 安装失败，跳过防火墙配置（不影响后续安装）如需UFW功能请后续手动安装..."
+            # UFW_INSTALLED 保持 false
+        fi
     else
-        log_info "UFW服务未运行，正在启动..."
-        systemctl start ufw >/dev/null 2>&1 || {
-            log_error "UFW服务启动失败（不影响后续配置）..."
-        }
-        log_success "UFW服务已启动（或尝试启动）"
+        UFW_INSTALLED=true
     fi
 
-    # ==================== 升级：添加规则并明确提示成功/失败 ====================
-    log_info "正在添加防火墙规则..."
+    # 只有 UFW 可用时才配置规则
+    if [ "$UFW_INSTALLED" = true ]; then
+        log_info "添加防火墙规则..."
 
-    # 1. 放行WireGuard端口（自定义UDP）
-    /usr/sbin/ufw allow "${DEFAULT_WG_PORT}/udp"
-    if [ $? -eq 0 ]; then
-        log_success "✅ 已放行WireGuard端口：${DEFAULT_WG_PORT}/UDP"
+        # SSH 最先放行（防止启用时断连）
+        if ufw allow 22/tcp >/dev/null 2>&1; then
+            log_success "✅ 已放行 SSH 端口：22/TCP"
+        else
+            log_warning "⚠️ 无法放行 SSH 端口（请手动执行：ufw allow 22/tcp）"
+        fi
+
+        # WireGuard
+        if ufw allow "${DEFAULT_WG_PORT}/udp" >/dev/null 2>&1; then
+            log_success "✅ 已放行 WireGuard 端口：${DEFAULT_WG_PORT}/UDP"
+        else
+            log_warning "⚠️ 无法放行 WireGuard 端口（请手动执行：ufw allow ${DEFAULT_WG_PORT}/udp）"
+        fi
+
+        # Web 管理
+        if ufw allow "${DEFAULT_WEB_PORT}/tcp" >/dev/null 2>&1; then
+            log_success "✅ 已放行 Web 管理端口：${DEFAULT_WEB_PORT}/TCP"
+        else
+            log_warning "⚠️ 无法放行 Web 管理端口（请手动执行：ufw allow ${DEFAULT_WEB_PORT}/tcp）"
+        fi
+
+        # 启用防火墙
+        echo "y" | ufw enable >/dev/null 2>&1
+        if [ $? -eq 0 ]; then
+            log_success "UFW 防火墙已成功启用"
+        else
+            log_warning "UFW 启用失败，规则可能未生效，请手动执行：ufw enable"
+        fi
+
+        # 显示状态
+        log_info "当前防火墙状态："
+        ufw status | tee -a "$LOG_FILE"
     else
-        log_warning "⚠️ 无法放行WireGuard端口：${DEFAULT_WG_PORT}/UDP（请手动执行：ufw allow ${DEFAULT_WG_PORT}/udp）"
+        log_warning "UFW 不可用，已跳过防火墙规则配置"
     fi
 
-    # 2. 放行Web管理端口（自定义TCP）
-    /usr/sbin/ufw allow "${DEFAULT_WEB_PORT}/tcp"
-    if [ $? -eq 0 ]; then
-        log_success "✅ 已放行Web管理端口：${DEFAULT_WEB_PORT}/TCP"
-    else
-        log_warning "⚠️ 无法放行Web管理端口：${DEFAULT_WEB_PORT}/TCP（请手动执行：ufw allow ${DEFAULT_WEB_PORT}/tcp）"
-    fi
-
-    # 3. 放行SSH端口（固定TCP，可选保留）
-    /usr/sbin/ufw allow "22/tcp"
-    if [ $? -eq 0 ]; then
-        log_success "✅ 已放行SSH端口：22/TCP"
-    else
-        log_warning "⚠️ 无法放行SSH端口：22/TCP（请手动执行：ufw allow 22/tcp）"
-    fi
-
-    # ... （启用UFW的逻辑保持不变） ...
+    log_success "防火墙配置阶段完成（如有问题请手动处理）"
 }
 
 # 启动WG-Easy（无修改，保留原容器清理和启动逻辑）
@@ -255,7 +265,7 @@ start_wg_easy() {
     
     if docker ps -a | grep -q "wg-easy"; then
         log_warning "检测到旧容器，正在清理..."
-		rm -rf /root/​wg-easy-install.log​
+		rm -rf /root/​wg-easy-install.log
 		rm -rf wg-easy-quick-ref.txt​
         docker stop wg-easy && docker rm wg-easy
     fi
