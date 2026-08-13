@@ -314,8 +314,35 @@ DNS: 1.1.1.1, 8.8.8.8（默认）
 EOF
     log_success "安装信息已保存到$LOG_FILE和$INFO_FILE"
 }
+
+# ==================== 检查是否已安装 ====================
+check_installed() {
+    local installed=false
+
+    # 检测 Docker
+    if command -v docker &> /dev/null; then
+        # 检测 WG-Easy 容器是否在运行
+        if docker ps --format '{{.Names}}' | grep -q "^wg-easy$"; then
+            # 检测配置文件是否存在
+            if [ -f "/etc/docker/containers/wg-easy/docker-compose.yml" ]; then
+                installed=true
+            fi
+        fi
+    fi
+
+    if [ "$installed" = true ]; then
+        log_success "检测到 WG-Easy 已安装并正在运行"
+        log_info "Web管理面板: http://${wanip}:${DEFAULT_WEB_PORT}"
+        log_info "如需重新安装，请先停止并删除容器："
+        log_info "  docker stop wg-easy && docker rm wg-easy"
+        log_info "  rm -rf /etc/docker/containers/wg-easy"
+        log_info "然后重新运行此脚本。"
+        exit 0
+    fi
+}
 # ==================== 主流程 ====================
 main() {
+	check_installed   # 先检测是否已安装
     log_info "开始安装WG-Easy官方版（网页后台可配置自定义端口）..."
     install_dependencies
     install_docker
