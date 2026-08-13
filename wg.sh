@@ -4,8 +4,7 @@
 # 使用官方Docker Compose文件，支持HTTP/HTTPS和自动配置
 
 set -e
-
-rm -rf /root/*.sh.*
+SCRIPT_SELF=$(realpath "${BASH_SOURCE[0]}" 2>/dev/null || echo "${BASH_SOURCE[0]}")
 
 # ==================== 颜色定义 ====================
 RED='\033[0;31m'
@@ -372,8 +371,7 @@ main "$@"
 
 # ==================== 清理临时文件 ====================
 # 保留 install.log 和 quick-ref.txt 供用户查阅
-SCRIPT_PATH=$(realpath "$0" 2>/dev/null || echo "$0")
-rm -f "$SCRIPT_PATH" 2>/dev/null
+rm -f "$SCRIPT_SELF" 2>/dev/null
 rm -f /root/*.sh.* 2>/dev/null
 
 exit 0
