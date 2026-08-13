@@ -125,43 +125,79 @@ install_dependencies() {
     log_success "依赖安装完成"
 }
 
-# 安装Docker（无修改）
 install_docker() {
+    # 幂等性：如果 Docker 已安装，跳过
+    if command -v docker &> /dev/null; then
+        log_info "Docker 已安装，跳过安装步骤"
+        return 0
+    fi
+
     log_info "安装Docker..."
-    
-    unset http_proxy https_proxy all_proxy >/dev/null 2>&1
-    
-    apt-get update && apt-get install -y --force-yes ca-certificates curl >/dev/null 2>&1
-    
-    rm -f /etc/apt/trusted.gpg.d/docker.gpg >/dev/null 2>&1
-    
-    local docker_gpg_url="https://download.docker.com/linux/debian/gpg"
-    if [[ ! "$docker_gpg_url" =~ ^https?://[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/.*$ ]]; then
-        log_error "Docker GPG URL格式错误：$docker_gpg_url"
-        exit 1
-    fi
-    
+
+    # 清理环境
+    unset http_proxy https_proxy all_proxy 2>/dev/null
+    rm -f /etc/apt/sources.list.d/docker.list
+    rm -f /etc/apt/trusted.gpg.d/docker.gpg
+    rm -f /usr/share/keyrings/docker-archive-keyring.gpg
+
+    # 安装必要工具
+    apt-get update -qq >/dev/null 2>&1
+    apt-get install -y -qq ca-certificates curl gnupg >/dev/null 2>&1
+
+    # 创建密钥目录
+    mkdir -p /usr/share/keyrings
+
+    # 下载 GPG 密钥（最多重试 5 次）
     local tmp_gpg="/tmp/docker.gpg"
-    curl -fsSL \
-        --retry 3 \
-        --retry-delay 2 \
-        -o "$tmp_gpg" "$docker_gpg_url" >/dev/null 2>&1
-    
-    if [ ! -s "$tmp_gpg" ]; then
-        log_error "Docker GPG密钥下载失败（请检查网络/DNS）！"
+    local retry=0
+    local max_retry=5
+    local success=false
+
+    while [ $retry -lt $max_retry ]; do
+        retry=$((retry + 1))
+        log_info "尝试下载 Docker GPG 密钥 (第 $retry/$max_retry 次)..."
+        if curl -4 -fsSL --connect-timeout 10 --retry 2 -o "$tmp_gpg" "https://download.docker.com/linux/debian/gpg"; then
+            if [ -s "$tmp_gpg" ]; then
+                success=true
+                break
+            fi
+        fi
+        sleep 2
+    done
+
+    if [ "$success" != "true" ]; then
+        log_error "Docker GPG 密钥下载失败，请检查网络后重试"
         exit 1
     fi
-    
-    gpg --dearmor -o /etc/apt/trusted.gpg.d/docker.gpg "$tmp_gpg" >/dev/null 2>&1
-    rm -f "$tmp_gpg" >/dev/null 2>&1
-    
-    echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/trusted.gpg.d/docker.gpg] https://mirrors.aliyun.com/docker-ce/linux/debian $(lsb_release -cs) stable" > /etc/apt/sources.list.d/docker.list
-    
-    apt-get update && apt-get install -y --force-yes docker-ce docker-ce-cli containerd.io >/dev/null 2>&1
-    
+
+    # 安装密钥（使用新格式）
+    gpg --dearmor -o /usr/share/keyrings/docker-archive-keyring.gpg "$tmp_gpg" >/dev/null 2>&1
+    rm -f "$tmp_gpg"
+
+    # 添加 Docker 源（阿里云镜像）
+    echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] https://mirrors.aliyun.com/docker-ce/linux/debian $(lsb_release -cs) stable" > /etc/apt/sources.list.d/docker.list
+
+    # 更新源（失败则重试一次）
+    log_info "更新 APT 源..."
+    if ! apt-get update >/dev/null 2>&1; then
+        log_warning "APT 更新失败，等待 3 秒后重试..."
+        sleep 3
+        apt-get update >/dev/null 2>&1 || {
+            log_error "APT 更新仍然失败，请检查网络或源配置"
+            exit 1
+        }
+    fi
+
+    # 安装 Docker
+    log_info "安装 Docker 组件..."
+    apt-get install -y -qq docker-ce docker-ce-cli containerd.io >/dev/null 2>&1 || {
+        log_error "Docker 安装失败"
+        exit 1
+    }
+
     systemctl enable --now docker >/dev/null 2>&1
-    
-    log_success "Docker安装完成"
+
+    log_success "Docker 安装完成"
 }
 
 # 安装Docker Compose（无修改）
