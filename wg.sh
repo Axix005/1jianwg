@@ -56,6 +56,32 @@ if ! command -v curl &> /dev/null; then
     apt-get update && apt-get install -y curl || { echo "安装curl失败，请手动安装后重试"; exit 1; }
 fi
 
+# ==================== 修复 raw.githubusercontent.com DNS ====================
+fix_github_hosts() {
+    # 检查是否已经绑定了可用 IP
+    if grep -q "raw.githubusercontent.com" /etc/hosts; then
+        # 如果已经绑定，检查当前绑定的 IP 是否可达
+        local current_ip=$(grep "raw.githubusercontent.com" /etc/hosts | awk '{print $1}')
+        if curl -s --connect-timeout 3 -o /dev/null "https://raw.githubusercontent.com" --resolve "raw.githubusercontent.com:443:$current_ip"; then
+            return 0  # 当前 IP 可用，无需修改
+        else
+            # 当前 IP 不可用，删除旧绑定
+            sed -i '/raw.githubusercontent.com/d' /etc/hosts
+        fi
+    fi
+
+    # 尝试多个已知可用 IP
+    for ip in 185.199.108.133 185.199.109.133 185.199.110.133 185.199.111.133; do
+        if curl -s --connect-timeout 3 -o /dev/null "https://raw.githubusercontent.com" --resolve "raw.githubusercontent.com:443:$ip"; then
+            echo "$ip raw.githubusercontent.com" >> /etc/hosts
+            log_info "已绑定 raw.githubusercontent.com 到 $ip"
+            return 0
+        fi
+    done
+
+    log_warning "无法自动绑定 raw.githubusercontent.com，尝试直连（可能较慢）"
+}
+
 # ==================== 全自动IP探测 ====================
 function get_public_ip() {
     local ip=""
@@ -381,6 +407,7 @@ check_installed() {
 }
 # ==================== 主流程 ====================
 main() {
+	fix_github_hosts   # 先自动修复 DNS
 	check_installed   # 先检测是否已安装
     log_info "开始安装WG-Easy官方版（网页后台可配置自定义端口）..."
     install_dependencies
