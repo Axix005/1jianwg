@@ -219,7 +219,7 @@ setup_config() {
     cd /etc/docker/containers/wg-easy || exit
 
     log_info "下载官方Docker Compose文件..."
-    curl -o docker-compose.yml https://raw.githubusercontent.com/wg-easy/wg-easy/master/docker-compose.yml
+    curl -o docker-compose.yml https://ghproxy.com/https://raw.githubusercontent.com/wg-easy/wg-easy/master/docker-compose.yml
 
     # ==================== 禁用https ====================
     log_info "配置禁用https"
