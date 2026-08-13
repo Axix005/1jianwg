@@ -7,7 +7,14 @@ set -e
 
 rm -rf /root/*.sh.*
 
-# ==================== 先定义日志系统（避免函数未定义） ====================
+# ==================== 颜色定义 ====================
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+NC='\033[0m'
+
+# ==================== 日志函数定义 ====================
 LOG_FILE="/root/wg-easy-install.log"
 INFO_FILE="/root/wg-easy-quick-ref.txt"
 
@@ -28,12 +35,18 @@ warning() {
     echo -e "${YELLOW}[WARNING] $1${NC}" | tee -a "$LOG_FILE" 
 }
 
-# 颜色定义（放在日志函数后不影响）
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-NC='\033[0m'
+# 检测终端颜色输出
+if [ -t 1 ]; then
+    log_info() { echo -e "${BLUE}[INFO]${NC} $1"; }
+    log_success() { echo -e "${GREEN}[SUCCESS]${NC} $1"; }
+    log_error() { echo -e "${RED}[ERROR]${NC} $1" >&2; }
+    log_warning() { echo -e "${YELLOW}[WARNING]${NC} $1"; }
+else
+    log_info() { echo "[INFO] $1"; }
+    log_success() { echo "[SUCCESS] $1"; }
+    log_error() { echo "[ERROR] $1" >&2; }
+    log_warning() { echo "[WARNING] $1"; }
+fi
 
 # 检查curl是否存在，若不存在则自动安装
 if ! command -v curl &> /dev/null; then
@@ -95,27 +108,13 @@ fi
 
 echo "✅ 使用最终确认的公网IP: $wanip"
 
-
-# 检测终端颜色输出
-if [ -t 1 ]; then
-    log_info() { echo -e "${BLUE}[INFO]${NC} $1"; }
-    log_success() { echo -e "${GREEN}[SUCCESS]${NC} $1"; }
-    log_error() { echo -e "${RED}[ERROR]${NC} $1" >&2; }
-    log_warning() { echo -e "${YELLOW}[WARNING]${NC} $1"; }
-else
-    log_info() { echo "[INFO] $1"; }
-    log_success() { echo "[SUCCESS] $1"; }
-    log_error() { echo "[ERROR] $1" >&2; }
-    log_warning() { echo "[WARNING] $1"; }
-fi
-
 # ==================== 核心改进：端口配置 ====================
 # 默认端口
 DEFAULT_WG_PORT="51820"    # WireGuard 默认端口
 DEFAULT_WEB_PORT="51821"   # WG-Easy 管理后台默认端口
 
 
-# 安装依赖
+# 安装依赖（无修改）
 install_dependencies() {
     log_info "安装系统依赖..."
     apt-get update && apt-get install -y \
@@ -127,7 +126,7 @@ install_dependencies() {
     log_success "依赖安装完成"
 }
 
-# 安装Docker
+# 安装Docker（无修改）
 install_docker() {
     log_info "安装Docker..."
     
@@ -166,7 +165,7 @@ install_docker() {
     log_success "Docker安装完成"
 }
 
-# 安装Docker Compose
+# 安装Docker Compose（无修改）
 install_docker_compose() {
     log_info "安装Docker Compose..."
     COMPOSE_VERSION=$(curl -s https://api.github.com/repos/docker/compose/releases/latest | grep 'tag_name' | cut -d '"' -f 4)
@@ -220,8 +219,6 @@ configure_firewall() {
         log_success "UFW服务已启动（或尝试启动）"
     fi
 
-    # ... （安装/启动UFW的逻辑保持不变，参考之前的修复） ...
-
     # ==================== 升级：添加规则并明确提示成功/失败 ====================
     log_info "正在添加防火墙规则..."
 
@@ -274,7 +271,7 @@ start_wg_easy() {
         exit 1
     fi
 }
-# ==================== 记录安装信息 ====================
+# ==================== 记录安装信息（函数定义移到main之前） ====================
 log_install_info() {
     {
         log_success "=== 安装完成 ==="
@@ -335,6 +332,10 @@ main() {
 # 执行安装
 main "$@"
 
-# 清理临时文件
-rm -rf /root/*.sh
-rm -rf /root/*.sh.*
+# ==================== 清理临时文件 ====================
+# 保留 install.log 和 quick-ref.txt 供用户查阅
+SCRIPT_PATH=$(realpath "$0" 2>/dev/null || echo "$0")
+rm -f "$SCRIPT_PATH" 2>/dev/null
+rm -f /root/*.sh.* 2>/dev/null
+
+exit 0
