@@ -290,8 +290,28 @@ setup_config() {
     log_success "禁用https配置文件修改完成"
 }
 
-
 # ==================== 改进：防火墙配置 ====================
+# 👇 在这里插入 detect_ssh_port() 函数
+detect_ssh_port() {
+    local ssh_port="22"
+    
+    # 检查主配置文件
+    if [ -f /etc/ssh/sshd_config ]; then
+        ssh_port=$(grep -E "^Port\s+" /etc/ssh/sshd_config | awk '{print $2}')
+    fi
+    
+    # 如果没找到，检查包含的配置目录
+    if [ -z "$ssh_port" ] && [ -d /etc/ssh/sshd_config.d/ ]; then
+        ssh_port=$(grep -r -E "^Port\s+" /etc/ssh/sshd_config.d/ 2>/dev/null | head -1 | awk '{print $2}')
+    fi
+    
+    # 如果还是没有，使用默认值
+    ssh_port=${ssh_port:-22}
+    
+    echo "$ssh_port"
+}
+
+#防火墙安装及配置
 configure_firewall() {
     # 根据前置交互的结果执行
     if [ "$INSTALL_UFW" = "installed" ]; then
@@ -315,11 +335,15 @@ configure_firewall() {
 configure_ufw_rules() {
     log_info "配置 UFW 防火墙规则..."
 
+    # 检测SSH端口（防止断连）
+    local ssh_port=$(detect_ssh_port)
+    log_info "检测到 SSH 端口: $ssh_port"
+    
     # SSH 最先放行（防止启用时断连）
-    if ufw allow 22/tcp >/dev/null 2>&1; then
-        log_success "✅ 已放行 SSH 端口：22/TCP"
+    if ufw allow "${ssh_port}/tcp" >/dev/null 2>&1; then
+        log_success "✅ 已放行 SSH 端口：${ssh_port}/TCP"
     else
-        log_warning "⚠️ 无法放行 SSH 端口（请手动执行：ufw allow 22/tcp）"
+        log_warning "⚠️ 无法放行 SSH 端口 ${ssh_port}（请手动执行：ufw allow ${ssh_port}/tcp）"
     fi
 
     # WireGuard
@@ -341,6 +365,7 @@ configure_ufw_rules() {
         echo "y" | ufw enable >/dev/null 2>&1
         if [ $? -eq 0 ]; then
             log_success "UFW 防火墙已成功启用"
+            log_info "已放行端口: SSH(${ssh_port}), WG(${DEFAULT_WG_PORT}/UDP), WEB(${DEFAULT_WEB_PORT}/TCP)"
         else
             log_warning "UFW 启用失败，规则可能未生效，请手动执行：ufw enable"
         fi
@@ -361,8 +386,8 @@ start_wg_easy() {
     
     if docker ps -a | grep -q "wg-easy"; then
         log_warning "检测到旧容器，正在清理..."
-		rm -rf /root/​wg-easy-install.log
-		rm -rf wg-easy-quick-ref.txt​
+	rm -rf /root/wg-easy-install.log
+	rm -rf /root/wg-easy-quick-ref.txt
         docker stop wg-easy && docker rm wg-easy
     fi
 
