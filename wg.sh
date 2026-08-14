@@ -1,7 +1,6 @@
 #!/bin/bash
 
-# WG-Easy 安装脚本（适配v15.1 - 支持自定义端口）
-# 使用官方Docker Compose文件，支持HTTP/HTTPS和自动配置
+# WG-Easy 安装脚本（官方Docker Compose）
 
 set -e
 # 获取脚本所在目录和文件名（绝对路径）
