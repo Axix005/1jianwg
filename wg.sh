@@ -141,6 +141,8 @@ echo "✅ 使用最终确认的公网IP: $wanip"
 DEFAULT_WG_PORT="51820"    # WireGuard 默认端口
 DEFAULT_WEB_PORT="51821"   # WG-Easy 管理后台默认端口
 
+# UFW 安装选项（默认不安装）
+INSTALL_UFW="false"
 
 # 安装依赖（无修改）
 install_dependencies() {
@@ -229,11 +231,22 @@ install_docker() {
     log_success "Docker 安装完成"
 }
 
-# 安装Docker Compose（无修改）
+# 安装Docker Compose
 install_docker_compose() {
     log_info "安装Docker Compose..."
-    COMPOSE_VERSION=$(curl -s https://api.github.com/repos/docker/compose/releases/latest | grep 'tag_name' | cut -d '"' -f 4)
-    curl -L "https://github.com/docker/compose/releases/download/${COMPOSE_VERSION}/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
+    COMPOSE_VERSION=$(curl -s --connect-timeout 10 --retry 2 https://api.github.com/repos/docker/compose/releases/latest | grep 'tag_name' | cut -d '"' -f 4)
+    
+    if [ -z "$COMPOSE_VERSION" ]; then
+        log_error "获取 Docker Compose 版本号失败"
+        exit 1
+    fi
+    
+    log_info "下载 Docker Compose 二进制文件..."
+    if ! curl -L -o /usr/local/bin/docker-compose --connect-timeout 10 --retry 5 --retry-delay 3 "https://github.com/docker/compose/releases/download/${COMPOSE_VERSION}/docker-compose-$(uname -s)-$(uname -m)"; then
+        log_error "Docker Compose 下载失败，请检查网络后重试"
+        exit 1
+    fi
+    
     chmod +x /usr/local/bin/docker-compose
     log_success "Docker Compose安装完成 ($(docker-compose --version | cut -d' ' -f3))"
 }
@@ -264,32 +277,21 @@ setup_config() {
 
 # ==================== 改进：防火墙配置 ====================
 configure_firewall() {
-    # 检查 UFW 是否已安装
-    if command -v ufw &> /dev/null; then
-        log_info "检测到 UFW 已安装，直接配置防火墙规则..."
+    # 根据前置交互的结果执行
+    if [ "$INSTALL_UFW" = "installed" ]; then
+        log_info "UFW 已安装，正在配置防火墙规则..."
         configure_ufw_rules
-        return 0
-    fi
-
-    # UFW 未安装，询问用户
-    log_info "未检测到 UFW 防火墙"
-    read -p "是否安装并配置 UFW 防火墙？输入 y 确认，按 Enter 跳过（默认不安装）: " ufw_choice
-
-    if [[ "$ufw_choice" != "y" && "$ufw_choice" != "Y" ]]; then
-        log_info "跳过 UFW 防火墙安装和配置"
-        log_success "防火墙配置阶段完成（已跳过）"
-        return 0
-    fi
-
-    # 用户确认安装 UFW
-    log_info "开始安装 UFW 防火墙..."
-    if apt-get update && apt-get install -y ufw >/dev/null 2>&1; then
-        log_success "UFW 安装完成"
-        configure_ufw_rules
+    elif [ "$INSTALL_UFW" = "true" ]; then
+        log_info "正在安装 UFW 防火墙..."
+        if apt-get update && apt-get install -y ufw >/dev/null 2>&1; then
+            log_success "UFW 安装完成"
+            configure_ufw_rules
+        else
+            log_warning "UFW 安装失败，跳过防火墙配置（不影响后续安装）"
+        fi
     else
-        log_warning "UFW 安装失败，跳过防火墙配置（不影响后续安装）"
-        log_success "防火墙配置阶段完成（如有问题请手动处理）"
-        return 0
+        log_info "UFW 防火墙未启用，跳过配置"
+        log_success "防火墙配置阶段完成（已跳过）"
     fi
 }
 
@@ -422,6 +424,22 @@ check_installed() {
 # ==================== 主流程 ====================
 main() {
 	fix_github_hosts   # 先自动修复 DNS
+	# ===== UFW 防火墙安装询问（无人值守前置交互） =====
+    # 先检测是否已安装
+    if command -v ufw &> /dev/null; then
+        log_info "检测到 UFW 已安装，将直接配置防火墙规则"
+        INSTALL_UFW="installed"
+    else
+        log_info "未检测到 UFW 防火墙"
+        read -p "是否安装并配置 UFW 防火墙？输入 y 确认，按 Enter 跳过（默认不安装）: " ufw_choice
+        if [[ "$ufw_choice" == "y" || "$ufw_choice" == "Y" ]]; then
+            INSTALL_UFW="true"
+            log_info "将在安装过程中安装并配置 UFW 防火墙"
+        else
+            INSTALL_UFW="false"
+            log_info "跳过 UFW 防火墙安装和配置"
+        fi
+    fi
 	check_installed   # 先检测是否已安装
     log_info "开始安装WG-Easy官方版（网页后台可配置自定义端口）..."
     install_dependencies
