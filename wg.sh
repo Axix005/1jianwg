@@ -98,7 +98,7 @@ function get_public_ip() {
     # 优先级3：阿里云DNS（用grep/awk解析JSON）
     [ -z "$ip" ] && {
         local aliyun_resp=$(curl -sS --connect-timeout 5 -m 10 http://dns.alidns.com/dns-query?name=one.one.one.one&type=A 2>/dev/null)
-        ip=$(echo "$aliyun_resp" | grep -A 1 "Answer" | awk -F '"' '{print $4}')
+        ip=$(echo "$aliyun_resp" | grep -A 1 "Answer" | awk -F '"' '{print $4}'2>/dev/null
     }
     
     # 优先级4：OpenDNS终极兜底（纯文本）
@@ -264,66 +264,77 @@ setup_config() {
 
 # ==================== 改进：防火墙配置 ====================
 configure_firewall() {
-    log_info "配置防火墙..."
-	
-    # 标记 UFW 是否安装成功
-    UFW_INSTALLED=false
-
-    # 安装 UFW（失败不退出，但记录标记）
-    if ! command -v ufw &> /dev/null; then
-        log_info "UFW 未安装，正在安装..."
-        if apt-get update && apt-get install -y ufw >/dev/null 2>&1; then
-            log_success "UFW 安装完成"
-            UFW_INSTALLED=true
-        else
-            log_warning "UFW 安装失败，跳过防火墙配置（不影响后续安装）如需UFW功能请后续手动安装..."
-            # UFW_INSTALLED 保持 false
-        fi
-    else
-        UFW_INSTALLED=true
+    # 检查 UFW 是否已安装
+    if command -v ufw &> /dev/null; then
+        log_info "检测到 UFW 已安装，直接配置防火墙规则..."
+        configure_ufw_rules
+        return 0
     fi
 
-    # 只有 UFW 可用时才配置规则
-    if [ "$UFW_INSTALLED" = true ]; then
-        log_info "添加防火墙规则..."
+    # UFW 未安装，询问用户
+    log_info "未检测到 UFW 防火墙"
+    read -p "是否安装并配置 UFW 防火墙？输入 y 确认，按 Enter 跳过（默认不安装）: " ufw_choice
 
-        # SSH 最先放行（防止启用时断连）
-        if ufw allow 22/tcp >/dev/null 2>&1; then
-            log_success "✅ 已放行 SSH 端口：22/TCP"
-        else
-            log_warning "⚠️ 无法放行 SSH 端口（请手动执行：ufw allow 22/tcp）"
-        fi
+    if [[ "$ufw_choice" != "y" && "$ufw_choice" != "Y" ]]; then
+        log_info "跳过 UFW 防火墙安装和配置"
+        log_success "防火墙配置阶段完成（已跳过）"
+        return 0
+    fi
 
-        # WireGuard
-        if ufw allow "${DEFAULT_WG_PORT}/udp" >/dev/null 2>&1; then
-            log_success "✅ 已放行 WireGuard 端口：${DEFAULT_WG_PORT}/UDP"
-        else
-            log_warning "⚠️ 无法放行 WireGuard 端口（请手动执行：ufw allow ${DEFAULT_WG_PORT}/udp）"
-        fi
+    # 用户确认安装 UFW
+    log_info "开始安装 UFW 防火墙..."
+    if apt-get update && apt-get install -y ufw >/dev/null 2>&1; then
+        log_success "UFW 安装完成"
+        configure_ufw_rules
+    else
+        log_warning "UFW 安装失败，跳过防火墙配置（不影响后续安装）"
+        log_success "防火墙配置阶段完成（如有问题请手动处理）"
+        return 0
+    fi
+}
 
-        # Web 管理
-        if ufw allow "${DEFAULT_WEB_PORT}/tcp" >/dev/null 2>&1; then
-            log_success "✅ 已放行 Web 管理端口：${DEFAULT_WEB_PORT}/TCP"
-        else
-            log_warning "⚠️ 无法放行 Web 管理端口（请手动执行：ufw allow ${DEFAULT_WEB_PORT}/tcp）"
-        fi
+# ==================== UFW 规则配置函数 ====================
+configure_ufw_rules() {
+    log_info "配置 UFW 防火墙规则..."
 
-        # 启用防火墙
+    # SSH 最先放行（防止启用时断连）
+    if ufw allow 22/tcp >/dev/null 2>&1; then
+        log_success "✅ 已放行 SSH 端口：22/TCP"
+    else
+        log_warning "⚠️ 无法放行 SSH 端口（请手动执行：ufw allow 22/tcp）"
+    fi
+
+    # WireGuard
+    if ufw allow "${DEFAULT_WG_PORT}/udp" >/dev/null 2>&1; then
+        log_success "✅ 已放行 WireGuard 端口：${DEFAULT_WG_PORT}/UDP"
+    else
+        log_warning "⚠️ 无法放行 WireGuard 端口（请手动执行：ufw allow ${DEFAULT_WG_PORT}/udp）"
+    fi
+
+    # Web 管理
+    if ufw allow "${DEFAULT_WEB_PORT}/tcp" >/dev/null 2>&1; then
+        log_success "✅ 已放行 Web 管理端口：${DEFAULT_WEB_PORT}/TCP"
+    else
+        log_warning "⚠️ 无法放行 Web 管理端口（请手动执行：ufw allow ${DEFAULT_WEB_PORT}/tcp）"
+    fi
+
+    # 启用防火墙（如果尚未启用）
+    if ! ufw status | grep -q "Status: active"; then
         echo "y" | ufw enable >/dev/null 2>&1
         if [ $? -eq 0 ]; then
             log_success "UFW 防火墙已成功启用"
         else
             log_warning "UFW 启用失败，规则可能未生效，请手动执行：ufw enable"
         fi
-
-        # 显示状态
-        log_info "当前防火墙状态："
-        ufw status | tee -a "$LOG_FILE"
     else
-        log_warning "UFW 不可用，已跳过防火墙规则配置"
+        log_info "UFW 防火墙已处于启用状态"
     fi
 
-    log_success "防火墙配置阶段完成（如有问题请手动处理）"
+    # 显示状态
+    log_info "当前防火墙状态："
+    ufw status | tee -a "$LOG_FILE"
+
+    log_success "防火墙配置完成"
 }
 
 # 启动WG-Easy（无修改，保留原容器清理和启动逻辑）
