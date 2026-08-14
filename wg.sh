@@ -186,7 +186,7 @@ install_docker() {
     while [ $retry -lt $max_retry ]; do
         retry=$((retry + 1))
         log_info "尝试下载 Docker GPG 密钥 (第 $retry/$max_retry 次)..."
-        if curl -4 -fsSL --connect-timeout 10 --retry 2 -o "$tmp_gpg" "https://download.docker.com/linux/debian/gpg"; then
+        if curl -4 -fsSL --connect-timeout 10 --retry 3 -o "$tmp_gpg" "https://download.docker.com/linux/debian/gpg"; then
             if [ -s "$tmp_gpg" ]; then
                 success=true
                 break
@@ -235,10 +235,10 @@ install_docker_compose() {
     log_info "安装Docker Compose..."
     
     # 获取版本号（带镜像 fallback）
-    COMPOSE_VERSION=$(curl -s --connect-timeout 10 --max-time 10 --retry 2 "https://api.github.com/repos/docker/compose/releases/latest" | grep 'tag_name' | cut -d '"' -f 4)
+    COMPOSE_VERSION=$(curl -s --connect-timeout 10 --max-time 10 --retry 3 "https://api.github.com/repos/docker/compose/releases/latest" | grep 'tag_name' | cut -d '"' -f 4)
     if [ -z "$COMPOSE_VERSION" ]; then
         log_warning "从 GitHub API 获取版本失败，尝试使用镜像 ghproxy.com..."
-        COMPOSE_VERSION=$(curl -s --connect-timeout 10 --max-time 10 --retry 2 "https://ghproxy.com/https://api.github.com/repos/docker/compose/releases/latest" | grep 'tag_name' | cut -d '"' -f 4)
+        COMPOSE_VERSION=$(curl -s --connect-timeout 10 --max-time 10 --retry 3 "https://ghfast.top/https://api.github.com/repos/docker/compose/releases/latest" | grep 'tag_name' | cut -d '"' -f 4)
         if [ -z "$COMPOSE_VERSION" ]; then
             log_error "获取 Docker Compose 版本号失败"
             exit 1
@@ -250,10 +250,10 @@ install_docker_compose() {
     # 下载二进制文件（带镜像 fallback）
     local download_url="https://github.com/docker/compose/releases/download/${COMPOSE_VERSION}/docker-compose-$(uname -s)-$(uname -m)"
     log_info "下载 Docker Compose 二进制文件..."
-    if ! curl -L -o /usr/local/bin/docker-compose --connect-timeout 10 --max-time 30 --retry 5 --retry-delay 3 "$download_url"; then
+    if ! curl -L -o /usr/local/bin/docker-compose --connect-timeout 10 --max-time 30 --retry 3 --retry-delay 3 "$download_url"; then
         log_warning "直连下载失败，尝试使用镜像 ghproxy.com..."
-        local mirror_url="https://ghproxy.com/${download_url}"
-        if ! curl -L -o /usr/local/bin/docker-compose --connect-timeout 10 --max-time 30 --retry 5 --retry-delay 3 "$mirror_url"; then
+        local mirror_url="https://ghfast.top/${download_url}"
+        if ! curl -L -o /usr/local/bin/docker-compose --connect-timeout 10 --max-time 30 --retry 3 --retry-delay 3 "$mirror_url"; then
             log_error "Docker Compose 下载失败，请检查网络后重试"
             exit 1
         fi
@@ -271,9 +271,9 @@ setup_config() {
 
     log_info "下载官方Docker Compose文件..."
     # 先尝试直连
-    if ! curl -L -o docker-compose.yml --connect-timeout 10 --max-time 30 --retry 5 --retry-delay 3 "https://raw.githubusercontent.com/wg-easy/wg-easy/master/docker-compose.yml"; then
+    if ! curl -L -o docker-compose.yml --connect-timeout 10 --max-time 30 --retry 3 --retry-delay 3 "https://raw.githubusercontent.com/wg-easy/wg-easy/master/docker-compose.yml"; then
         log_warning "直连下载失败，尝试使用镜像 ghproxy.com..."
-        if ! curl -L -o docker-compose.yml --connect-timeout 10 --max-time 30 --retry 5 --retry-delay 3 "https://ghproxy.com/https://raw.githubusercontent.com/wg-easy/wg-easy/master/docker-compose.yml"; then
+        if ! curl -L -o docker-compose.yml --connect-timeout 10 --max-time 30 --retry 3 --retry-delay 3 "https://ghfast.top/https://raw.githubusercontent.com/wg-easy/wg-easy/master/docker-compose.yml"; then
             log_error "下载失败，请检查网络后重试，或手动下载该文件到 $(pwd)"
             exit 1
         fi
