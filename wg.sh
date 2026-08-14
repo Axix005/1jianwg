@@ -233,19 +233,32 @@ install_docker() {
 # 安装Docker Compose
 install_docker_compose() {
     log_info "安装Docker Compose..."
-    COMPOSE_VERSION=$(curl -s --connect-timeout 10 --retry 2 https://api.github.com/repos/docker/compose/releases/latest | grep 'tag_name' | cut -d '"' -f 4)
     
+    # 获取版本号（带镜像 fallback）
+    COMPOSE_VERSION=$(curl -s --connect-timeout 10 --max-time 10 --retry 2 "https://api.github.com/repos/docker/compose/releases/latest" | grep 'tag_name' | cut -d '"' -f 4)
     if [ -z "$COMPOSE_VERSION" ]; then
-        log_error "获取 Docker Compose 版本号失败"
-        exit 1
+        log_warning "从 GitHub API 获取版本失败，尝试使用镜像 ghproxy.com..."
+        COMPOSE_VERSION=$(curl -s --connect-timeout 10 --max-time 10 --retry 2 "https://ghproxy.com/https://api.github.com/repos/docker/compose/releases/latest" | grep 'tag_name' | cut -d '"' -f 4)
+        if [ -z "$COMPOSE_VERSION" ]; then
+            log_error "获取 Docker Compose 版本号失败"
+            exit 1
+        fi
     fi
+
+    log_info "最新版本: $COMPOSE_VERSION"
     
+    # 下载二进制文件（带镜像 fallback）
+    local download_url="https://github.com/docker/compose/releases/download/${COMPOSE_VERSION}/docker-compose-$(uname -s)-$(uname -m)"
     log_info "下载 Docker Compose 二进制文件..."
-    if ! curl -L -o /usr/local/bin/docker-compose --connect-timeout 10 --retry 5 --retry-delay 3 "https://github.com/docker/compose/releases/download/${COMPOSE_VERSION}/docker-compose-$(uname -s)-$(uname -m)"; then
-        log_error "Docker Compose 下载失败，请检查网络后重试"
-        exit 1
+    if ! curl -L -o /usr/local/bin/docker-compose --connect-timeout 10 --max-time 30 --retry 5 --retry-delay 3 "$download_url"; then
+        log_warning "直连下载失败，尝试使用镜像 ghproxy.com..."
+        local mirror_url="https://ghproxy.com/${download_url}"
+        if ! curl -L -o /usr/local/bin/docker-compose --connect-timeout 10 --max-time 30 --retry 5 --retry-delay 3 "$mirror_url"; then
+            log_error "Docker Compose 下载失败，请检查网络后重试"
+            exit 1
+        fi
     fi
-    
+
     chmod +x /usr/local/bin/docker-compose
     log_success "Docker Compose安装完成 ($(docker-compose --version | cut -d' ' -f3))"
 }
@@ -257,10 +270,14 @@ setup_config() {
     cd /etc/docker/containers/wg-easy || exit
 
     log_info "下载官方Docker Compose文件..."
-if ! curl -L -o docker-compose.yml --connect-timeout 10 --max-time 30 --retry 5 --retry-delay 3 https://raw.githubusercontent.com/wg-easy/wg-easy/master/docker-compose.yml; then
-    log_error "下载失败，请检查网络后重试，或手动下载该文件到 $(pwd)"
-    exit 1
-fi
+    # 先尝试直连
+    if ! curl -L -o docker-compose.yml --connect-timeout 10 --max-time 30 --retry 5 --retry-delay 3 "https://raw.githubusercontent.com/wg-easy/wg-easy/master/docker-compose.yml"; then
+        log_warning "直连下载失败，尝试使用镜像 ghproxy.com..."
+        if ! curl -L -o docker-compose.yml --connect-timeout 10 --max-time 30 --retry 5 --retry-delay 3 "https://ghproxy.com/https://raw.githubusercontent.com/wg-easy/wg-easy/master/docker-compose.yml"; then
+            log_error "下载失败，请检查网络后重试，或手动下载该文件到 $(pwd)"
+            exit 1
+        fi
+    fi
 
     # ==================== 禁用https ====================
     log_info "配置禁用https"
