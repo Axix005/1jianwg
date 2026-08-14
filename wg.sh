@@ -98,7 +98,7 @@ function get_public_ip() {
     # 优先级3：阿里云DNS（用grep/awk解析JSON）
     [ -z "$ip" ] && {
         local aliyun_resp=$(curl -sS --connect-timeout 5 -m 10 http://dns.alidns.com/dns-query?name=one.one.one.one&type=A 2>/dev/null)
-        ip=$(echo "$aliyun_resp" | grep -A 1 "Answer" | awk -F '"' '{print $4}'2>/dev/null
+        ip=$(echo "$aliyun_resp" | grep -A 1 "Answer" | awk -F '"' '{print $4}' 2>/dev/null
     }
     
     # 优先级4：OpenDNS终极兜底（纯文本）
