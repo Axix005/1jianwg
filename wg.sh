@@ -177,7 +177,7 @@ install_docker() {
     # 创建密钥目录
     mkdir -p /usr/share/keyrings
 
-    # 下载 GPG 密钥（最多重试 5 次）
+    # 下载 GPG 密钥（最多重试 5 次，官方源失败自动切换阿里云镜像）
     local tmp_gpg="/tmp/docker.gpg"
     local retry=0
     local max_retry=5
@@ -187,6 +187,13 @@ install_docker() {
         retry=$((retry + 1))
         log_info "尝试下载 Docker GPG 密钥 (第 $retry/$max_retry 次)..."
         if curl -4 -fsSL --connect-timeout 10 --retry 3 -o "$tmp_gpg" "https://download.docker.com/linux/debian/gpg"; then
+            if [ -s "$tmp_gpg" ]; then
+                success=true
+                break
+            fi
+        fi
+        log_warning "官方源下载失败，尝试阿里云镜像..."
+        if curl -4 -fsSL --connect-timeout 10 --retry 3 -o "$tmp_gpg" "https://mirrors.aliyun.com/docker-ce/linux/debian/gpg"; then
             if [ -s "$tmp_gpg" ]; then
                 success=true
                 break
@@ -207,15 +214,19 @@ install_docker() {
     # 添加 Docker 源（阿里云镜像）
     echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] https://mirrors.aliyun.com/docker-ce/linux/debian $(lsb_release -cs) stable" > /etc/apt/sources.list.d/docker.list
 
-    # 更新源（失败则重试一次）
+    # 更新源（失败则重试一次，仍失败自动切换腾讯云源）
     log_info "更新 APT 源..."
     if ! apt-get update >/dev/null 2>&1; then
         log_warning "APT 更新失败，等待 3 秒后重试..."
         sleep 3
-        apt-get update >/dev/null 2>&1 || {
-            log_error "APT 更新仍然失败，请检查网络或源配置"
-            exit 1
-        }
+        if ! apt-get update >/dev/null 2>&1; then
+            log_warning "阿里云 Docker 源更新失败，切换腾讯云源..."
+            sed -i 's/mirrors.aliyun.com/mirrors.cloud.tencent.com/' /etc/apt/sources.list.d/docker.list
+            apt-get update >/dev/null 2>&1 || {
+                log_error "APT 更新仍然失败，请检查网络或源配置"
+                exit 1
+            }
+        fi
     fi
 
     # 安装 Docker
@@ -234,28 +245,37 @@ install_docker() {
 install_docker_compose() {
     log_info "安装Docker Compose..."
     
-    # 获取版本号（带镜像 fallback）
+    # 获取版本号（带镜像 fallback：githubproxy.cc → ghfast.top）
     COMPOSE_VERSION=$(curl -s --connect-timeout 10 --max-time 10 --retry 3 "https://api.github.com/repos/docker/compose/releases/latest" | grep 'tag_name' | cut -d '"' -f 4)
     if [ -z "$COMPOSE_VERSION" ]; then
-        log_warning "从 GitHub API 获取版本失败，尝试使用镜像 ghproxy.com..."
-        COMPOSE_VERSION=$(curl -s --connect-timeout 10 --max-time 10 --retry 3 "https://ghfast.top/https://api.github.com/repos/docker/compose/releases/latest" | grep 'tag_name' | cut -d '"' -f 4)
+        log_warning "从 GitHub API 获取版本失败，尝试使用镜像 githubproxy.cc..."
+        COMPOSE_VERSION=$(curl -s --connect-timeout 10 --max-time 10 --retry 3 "https://githubproxy.cc/https://api.github.com/repos/docker/compose/releases/latest" | grep 'tag_name' | cut -d '"' -f 4)
         if [ -z "$COMPOSE_VERSION" ]; then
-            log_error "获取 Docker Compose 版本号失败"
-            exit 1
+            log_warning "githubproxy.cc 失败，尝试使用镜像 ghfast.top..."
+            COMPOSE_VERSION=$(curl -s --connect-timeout 10 --max-time 10 --retry 3 "https://ghfast.top/https://api.github.com/repos/docker/compose/releases/latest" | grep 'tag_name' | cut -d '"' -f 4)
+            if [ -z "$COMPOSE_VERSION" ]; then
+                log_error "获取 Docker Compose 版本号失败"
+                exit 1
+            fi
         fi
     fi
 
     log_info "最新版本: $COMPOSE_VERSION"
     
-    # 下载二进制文件（带镜像 fallback）
-    local download_url="https://github.com/docker/compose/releases/download/${COMPOSE_VERSION}/docker-compose-$(uname -s)-$(uname -m)"
+    # 下载二进制文件（优先清华 TUNA，其次直连，最后 ghfast.top）
+    local compose_filename="docker-compose-$(uname -s)-$(uname -m)"
+    local download_url="https://github.com/docker/compose/releases/download/${COMPOSE_VERSION}/${compose_filename}"
+    local tuna_url="https://mirrors.tuna.tsinghua.edu.cn/github-release/docker/compose/${COMPOSE_VERSION}/${compose_filename}"
     log_info "下载 Docker Compose 二进制文件..."
-    if ! curl -L -o /usr/local/bin/docker-compose --connect-timeout 10 --max-time 30 --retry 3 --retry-delay 3 "$download_url"; then
-        log_warning "直连下载失败，尝试使用镜像 ghproxy.com..."
-        local mirror_url="https://ghfast.top/${download_url}"
-        if ! curl -L -o /usr/local/bin/docker-compose --connect-timeout 10 --max-time 30 --retry 3 --retry-delay 3 "$mirror_url"; then
-            log_error "Docker Compose 下载失败，请检查网络后重试"
-            exit 1
+    if ! curl -L -o /usr/local/bin/docker-compose --connect-timeout 10 --max-time 30 --retry 3 --retry-delay 3 "$tuna_url"; then
+        log_warning "清华 TUNA 下载失败，尝试直连..."
+        if ! curl -L -o /usr/local/bin/docker-compose --connect-timeout 10 --max-time 30 --retry 3 --retry-delay 3 "$download_url"; then
+            log_warning "直连下载失败，尝试使用镜像 ghfast.top..."
+            local mirror_url="https://ghfast.top/${download_url}"
+            if ! curl -L -o /usr/local/bin/docker-compose --connect-timeout 10 --max-time 30 --retry 3 --retry-delay 3 "$mirror_url"; then
+                log_error "Docker Compose 下载失败，请检查网络后重试"
+                exit 1
+            fi
         fi
     fi
 
@@ -270,24 +290,31 @@ setup_config() {
     cd /etc/docker/containers/wg-easy || exit
 
     log_info "下载官方Docker Compose文件..."
-    # 先尝试直连
-    if ! curl -L -o docker-compose.yml --connect-timeout 10 --max-time 30 --retry 3 --retry-delay 3 "https://raw.githubusercontent.com/wg-easy/wg-easy/master/docker-compose.yml"; then
-        log_warning "直连下载失败，尝试使用镜像 ghproxy.com..."
-        if ! curl -L -o docker-compose.yml --connect-timeout 10 --max-time 30 --retry 3 --retry-delay 3 "https://ghfast.top/https://raw.githubusercontent.com/wg-easy/wg-easy/master/docker-compose.yml"; then
-            log_error "下载失败，请检查网络后重试，或手动下载该文件到 $(pwd)"
-            exit 1
+    # 优先 raw.staticdn.net，其次直连，再次 githubproxy.cc，最后 ghfast.top
+    if ! curl -L -o docker-compose.yml --connect-timeout 10 --max-time 30 --retry 3 --retry-delay 3 "https://raw.staticdn.net/wg-easy/wg-easy/master/docker-compose.yml"; then
+        log_warning "raw.staticdn.net 下载失败，尝试直连..."
+        if ! curl -L -o docker-compose.yml --connect-timeout 10 --max-time 30 --retry 3 --retry-delay 3 "https://raw.githubusercontent.com/wg-easy/wg-easy/master/docker-compose.yml"; then
+            log_warning "直连下载失败，尝试使用镜像 githubproxy.cc..."
+            if ! curl -L -o docker-compose.yml --connect-timeout 10 --max-time 30 --retry 3 --retry-delay 3 "https://githubproxy.cc/https://raw.githubusercontent.com/wg-easy/wg-easy/master/docker-compose.yml"; then
+                log_warning "githubproxy.cc 下载失败，尝试使用镜像 ghfast.top..."
+                if ! curl -L -o docker-compose.yml --connect-timeout 10 --max-time 30 --retry 3 --retry-delay 3 "https://ghfast.top/https://raw.githubusercontent.com/wg-easy/wg-easy/master/docker-compose.yml"; then
+                    log_error "下载失败，请检查网络后重试，或手动下载该文件到 $(pwd)"
+                    exit 1
+                fi
+            fi
         fi
     fi
-}
+
     # ==================== 15版本本地已不需要禁用https,如果需要把注释删除即可 ====================
     #log_info "配置禁用https"
+    
     # 1. 清理原有注释的environment块
     #sed -i '/#environment:/,/^$/d' docker-compose.yml
     # 2. 添加环境变量（禁用https）
     #sed -i '/container_name:/a\    environment:' docker-compose.yml
     #sed -i '/environment:/a\      INSECURE: "true"' docker-compose.yml
     #log_success "禁用https配置文件修改完成"
-#}
+}
 
 # ==================== 改进：防火墙配置 ====================
 # 👇 在这里插入 detect_ssh_port() 函数
