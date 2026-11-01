@@ -139,6 +139,14 @@ install_docker() {
         return 0
     fi
     log_info "开始安装Docker（阿里云源）"
+
+    # 补丁：安装前置依赖（gnupg 是 gpg --dearmor 的前提；lsb_release 用于取发行版代号）
+    log_info "安装前置依赖（ca-certificates/curl/gnupg/lsb-release）..."
+    apt-get update -qq >/dev/null 2>&1 || true
+    apt-get install -y -qq ca-certificates curl gnupg lsb-release >/dev/null 2>&1 || {
+        error "前置依赖安装失败，请检查 apt 源后重试"
+    }
+
     rm -f /etc/apt/sources.list.d/docker.list /usr/share/keyrings/docker-archive-keyring.gpg
     mkdir -p /usr/share/keyrings
     local gpg_tmp="/tmp/docker.gpg"
@@ -203,12 +211,15 @@ clean_old() {
 start_service() {
     cd "$COMPOSE_DIR" || error "无法进入 $COMPOSE_DIR"
     log_info "拉取镜像并启动wg-easy"
-    docker compose up -d
+    # 补丁：捕获 pull/up 失败，避免 set -e 静默中断
+    if ! docker compose up -d; then
+        error "镜像拉取或容器启动失败，请检查网络后重试：cd ${COMPOSE_DIR} && docker compose up -d"
+    fi
     sleep 5
     if docker ps --format '{{.Names}}' | grep -q "^wg-easy$"; then
         success "WG-Easy容器启动成功"
     else
-        error "容器启动失败，请执行 docker compose logs 查看"
+        error "容器启动失败，请执行 cd ${COMPOSE_DIR} && docker compose logs 查看"
     fi
 }
 
@@ -244,6 +255,13 @@ check_installed() {
 
 # 主流程
 main() {
+    # 兜底：确保 curl 存在（fix_github_hosts/setup_dns 都依赖它）
+    if ! command -v curl &>/dev/null; then
+        log_info "安装 curl..."
+        apt-get update -qq >/dev/null 2>&1 || true
+        apt-get install -y -qq curl >/dev/null 2>&1 || error "curl 安装失败"
+    fi
+
     check_installed
     fix_github_hosts
     setup_dns
