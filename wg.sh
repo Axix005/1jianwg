@@ -279,16 +279,16 @@ setup_config() {
         fi
     fi
 
-    # ==================== 禁用https ====================
-    log_info "配置禁用https"
+    # ==================== 15版本本地已不需要禁用https,如果需要把注释删除即可 ====================
+    #log_info "配置禁用https"
     
     # 1. 清理原有注释的environment块
-    sed -i '/#environment:/,/^$/d' docker-compose.yml
+    #sed -i '/#environment:/,/^$/d' docker-compose.yml
     # 2. 添加环境变量（禁用https）
-    sed -i '/container_name:/a\    environment:' docker-compose.yml
-    sed -i '/environment:/a\      INSECURE: "true"' docker-compose.yml
-    log_success "禁用https配置文件修改完成"
-}
+    #sed -i '/container_name:/a\    environment:' docker-compose.yml
+    #sed -i '/environment:/a\      INSECURE: "true"' docker-compose.yml
+    #log_success "禁用https配置文件修改完成"
+#}
 
 # ==================== 改进：防火墙配置 ====================
 # 👇 在这里插入 detect_ssh_port() 函数
