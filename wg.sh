@@ -123,6 +123,52 @@ EOF
     cat /etc/resolv.conf | tee -a "$LOG_FILE"
 }
 
+# ==================== 确保 Docker 使用新 DNS（关键修复） ====================
+# 已运行的 Docker daemon 不会自动重读 /etc/resolv.conf，必须重启才会用新 DNS 解析镜像仓库
+ensure_docker_dns() {
+    # 1. 再次确认 /etc/resolv.conf 未被 systemd-resolved 覆盖回去
+    if ! grep -q "223.5.5.5" /etc/resolv.conf 2>/dev/null; then
+        log_warning "resolv.conf 已被覆盖，重新写入 DNS..."
+        chattr -i /etc/resolv.conf 2>/dev/null || true
+        if [ -L /etc/resolv.conf ]; then
+            rm -f /etc/resolv.conf
+        fi
+        cat > /etc/resolv.conf << 'EOF'
+nameserver 223.5.5.5
+nameserver 114.114.114.114
+EOF
+    fi
+
+    # 2. 若 Docker 已存在，重启 daemon 使其重新读取 resolv.conf
+    if command -v docker &> /dev/null; then
+        log_info "重启 Docker 服务以应用新 DNS 配置..."
+        systemctl restart docker >/dev/null 2>&1 || true
+
+        # 等待 Docker 就绪（最多 15 秒）
+        local i=0
+        while [ $i -lt 15 ]; do
+            if docker info >/dev/null 2>&1; then
+                break
+            fi
+            sleep 1
+            i=$((i+1))
+        done
+
+        if docker info >/dev/null 2>&1; then
+            log_success "Docker 服务已就绪"
+        else
+            log_warning "Docker 服务启动较慢，继续尝试拉取镜像..."
+        fi
+    fi
+
+    # 3. 验证 ghcr.io 可解析（仅提示，不阻塞）
+    if ! getent hosts ghcr.io >/dev/null 2>&1; then
+        log_warning "ghcr.io 解析失败，镜像拉取可能失败，请检查网络/DNS"
+    else
+        log_success "ghcr.io 域名解析正常"
+    fi
+}
+
 # ==================== 全自动IP探测 ====================
 function get_public_ip() {
     local ip=""
@@ -415,8 +461,11 @@ configure_ufw_rules() {
     log_success "防火墙配置完成"
 }
 
-# 启动WG-Easy（无修改，保留原容器清理和启动逻辑）
+# 启动WG-Easy（关键修复：先重启 Docker 应用新 DNS，再拉取镜像）
 start_wg_easy() {
+    # 关键修复：确保 Docker daemon 使用新 DNS（已安装的 Docker 不会自动重读 resolv.conf）
+    ensure_docker_dns
+
     log_info "启动WG-Easy服务..."
     
     if docker ps -a | grep -q "wg-easy"; then
@@ -427,7 +476,13 @@ start_wg_easy() {
     fi
 
     cd /etc/docker/containers/wg-easy || exit
-    docker compose up -d
+
+    # 关键修复：捕获 pull/up 失败，给出明确提示而非被 set -e 静默中断
+    if ! docker compose up -d; then
+        log_error "镜像拉取或服务启动失败，请检查网络/DNS 后重试："
+        log_error "  docker compose -f /etc/docker/containers/wg-easy/docker-compose.yml up -d"
+        exit 1
+    fi
     sleep 5
     
     if docker compose ps | grep -q "Up"; then
