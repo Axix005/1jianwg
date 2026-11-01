@@ -288,7 +288,7 @@ setup_config() {
     #sed -i '/container_name:/a\    environment:' docker-compose.yml
     #sed -i '/environment:/a\      INSECURE: "true"' docker-compose.yml
     #log_success "禁用https配置文件修改完成"
-#}
+}
 
 # ==================== 改进：防火墙配置 ====================
 # 👇 在这里插入 detect_ssh_port() 函数
