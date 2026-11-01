@@ -81,7 +81,7 @@ fix_github_hosts() {
     log_warning "无法自动绑定 raw.githubusercontent.com，尝试直连（可能较慢）"
 }
 
-# ==================== DNS 指定（新增：避免源拉取失败） ====================
+# ==================== DNS 指定（避免源拉取失败） ====================
 setup_dns() {
     log_info "配置系统 DNS 为 223.5.5.5 / 114.114.114.114 ..."
 
@@ -257,9 +257,9 @@ install_docker() {
         }
     fi
 
-    # 安装 Docker
-    log_info "安装 Docker 组件..."
-    apt-get install -y -qq docker-ce docker-ce-cli containerd.io >/dev/null 2>&1 || {
+    # 安装 Docker（方案A：同时安装 docker-compose-plugin，走阿里云源，避免 GitHub 下载）
+    log_info "安装 Docker 组件（含 compose plugin）..."
+    apt-get install -y -qq docker-ce docker-ce-cli containerd.io docker-compose-plugin >/dev/null 2>&1 || {
         log_error "Docker 安装失败"
         exit 1
     }
@@ -269,37 +269,27 @@ install_docker() {
     log_success "Docker 安装完成"
 }
 
-# 安装Docker Compose
+# 安装Docker Compose（方案A：仅检测/兜底，不再下载 GitHub 二进制）
 install_docker_compose() {
-    log_info "安装Docker Compose..."
-    
-    # 获取版本号（带镜像 fallback）
-    COMPOSE_VERSION=$(curl -s --connect-timeout 10 --max-time 10 --retry 3 "https://api.github.com/repos/docker/compose/releases/latest" | grep 'tag_name' | cut -d '"' -f 4)
-    if [ -z "$COMPOSE_VERSION" ]; then
-        log_warning "从 GitHub API 获取版本失败，尝试使用镜像 ghproxy.com..."
-        COMPOSE_VERSION=$(curl -s --connect-timeout 10 --max-time 10 --retry 3 "https://ghfast.top/https://api.github.com/repos/docker/compose/releases/latest" | grep 'tag_name' | cut -d '"' -f 4)
-        if [ -z "$COMPOSE_VERSION" ]; then
-            log_error "获取 Docker Compose 版本号失败"
-            exit 1
+    log_info "检测 Docker Compose (v2 plugin)..."
+
+    # docker compose version 成功则说明 plugin 已就绪
+    if docker compose version >/dev/null 2>&1; then
+        log_success "Docker Compose 已就绪 ($(docker compose version --short 2>/dev/null || docker compose version | head -1))"
+        return 0
+    fi
+
+    log_warning "未检测到 docker compose plugin，尝试通过 apt 安装..."
+    apt-get update -qq >/dev/null 2>&1 || true
+    if apt-get install -y -qq docker-compose-plugin >/dev/null 2>&1; then
+        if docker compose version >/dev/null 2>&1; then
+            log_success "Docker Compose plugin 安装完成 ($(docker compose version --short 2>/dev/null || docker compose version | head -1))"
+            return 0
         fi
     fi
 
-    log_info "最新版本: $COMPOSE_VERSION"
-    
-    # 下载二进制文件（带镜像 fallback）
-    local download_url="https://github.com/docker/compose/releases/download/${COMPOSE_VERSION}/docker-compose-$(uname -s)-$(uname -m)"
-    log_info "下载 Docker Compose 二进制文件..."
-    if ! curl -L -o /usr/local/bin/docker-compose --connect-timeout 10 --max-time 30 --retry 3 --retry-delay 3 "$download_url"; then
-        log_warning "直连下载失败，尝试使用镜像 ghproxy.com..."
-        local mirror_url="https://ghfast.top/${download_url}"
-        if ! curl -L -o /usr/local/bin/docker-compose --connect-timeout 10 --max-time 30 --retry 3 --retry-delay 3 "$mirror_url"; then
-            log_error "Docker Compose 下载失败，请检查网络后重试"
-            exit 1
-        fi
-    fi
-
-    chmod +x /usr/local/bin/docker-compose
-    log_success "Docker Compose安装完成 ($(docker-compose --version | cut -d' ' -f3))"
+    log_error "docker-compose-plugin 安装失败，请检查 apt 源或网络后重试"
+    exit 1
 }
 
 # ====================配置文件设置====================
@@ -502,8 +492,8 @@ check_installed() {
 }
 # ==================== 主流程 ====================
 main() {
-	setup_dns          # 新增：先配置 DNS，避免源拉取失败
-	fix_github_hosts   # 先自动修复 DNS
+	setup_dns          # 先配置 DNS，避免源拉取失败
+	fix_github_hosts   # 再自动修复 raw.githubusercontent.com
 	# ===== UFW 防火墙安装询问（无人值守前置交互） =====
     # 先检测是否已安装
     if command -v ufw &> /dev/null; then
