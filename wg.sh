@@ -15,6 +15,9 @@ YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m'
 
+# ==================== HTTPS 启用选项（默认禁用，main 中询问后覆盖） ====================
+ENABLE_HTTPS="false"
+
 # ==================== 日志函数定义 ====================
 LOG_FILE="/root/wg-easy-install.log"
 INFO_FILE="/root/wg-easy-quick-ref.txt"
@@ -308,14 +311,18 @@ setup_config() {
         fi
     fi
 
-    # ==================== 15版本本地已不需要禁用https,如果需要把注释删除即可 ====================
-    #log_info "配置禁用https"
-    # 1. 清理原有注释的environment块
-    #sed -i '/#environment:/,/^$/d' docker-compose.yml
-    # 2. 添加环境变量（禁用https）
-    #sed -i '/container_name:/a\    environment:' docker-compose.yml
-    #sed -i '/environment:/a\      INSECURE: "true"' docker-compose.yml
-    #log_success "禁用https配置文件修改完成"
+    # ==================== HTTPS 配置（按用户选择） ====================
+    if [ "$ENABLE_HTTPS" = "false" ]; then
+        log_info "配置禁用https"
+        # 1. 清理原有注释的environment块
+        sed -i '/#environment:/,/^$/d' docker-compose.yml
+        # 2. 添加环境变量（禁用https）
+        sed -i '/container_name:/a\    environment:' docker-compose.yml
+        sed -i '/environment:/a\      INSECURE: "true"' docker-compose.yml
+        log_success "禁用https配置文件修改完成"
+    else
+        log_info "保留 HTTPS 配置（请确保已配置反向代理，否则无法登录管理面板）"
+    fi
 }
 
 # ==================== 改进：防火墙配置 ====================
@@ -492,6 +499,18 @@ check_installed() {
 }
 # ==================== 主流程 ====================
 main() {
+	# ===== HTTPS 启用询问（前置交互） =====
+	log_info "WG-Easy 默认使用 HTTPS（首次登录需要配置反向代理，否则无法登录管理面板）"
+	log_warning "若未配置反向代理，请保持默认禁用 HTTPS，直接使用 HTTP 访问管理面板"
+	read -p "是否启用 HTTPS？输入 y 确认启用（需先配置反向代理，否则登录不了），按 Enter 或其他默认禁用 HTTPS: " https_choice
+	if [[ "$https_choice" == "y" || "$https_choice" == "Y" ]]; then
+		ENABLE_HTTPS="true"
+		log_info "已选择：启用 HTTPS（请确保已配置反向代理，否则无法登录）"
+	else
+		ENABLE_HTTPS="false"
+		log_info "已选择：不启用 HTTPS（将为容器设置 INSECURE: \"true\"，可直接 HTTP 访问）"
+	fi
+
 	setup_dns          # 先配置 DNS，避免源拉取失败
 	fix_github_hosts   # 再自动修复 raw.githubusercontent.com
 	# ===== UFW 防火墙安装询问（无人值守前置交互） =====
